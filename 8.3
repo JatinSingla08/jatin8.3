@@ -1,0 +1,68 @@
+// role_based_access.js
+import express from "express";
+import jwt from "jsonwebtoken";
+import bcrypt from "bcryptjs";
+
+const app = express();
+app.use(express.json());
+
+const SECRET = "mysecretkey";
+const users = []; // In-memory users
+
+// Register user
+app.post("/register", async (req, res) => {
+  const { username, password, role } = req.body;
+  const hashed = await bcrypt.hash(password, 10);
+  users.push({ username, password: hashed, role });
+  res.json({ message: "User registered successfully" });
+});
+
+// Login user
+app.post("/login", async (req, res) => {
+  const { username, password } = req.body;
+  const user = users.find((u) => u.username === username);
+  if (!user) return res.status(400).json({ message: "User not found" });
+
+  const valid = await bcrypt.compare(password, user.password);
+  if (!valid) return res.status(400).json({ message: "Invalid password" });
+
+  const token = jwt.sign({ username: user.username, role: user.role }, SECRET, { expiresIn: "1h" });
+  res.json({ token });
+});
+
+// Middleware to verify token
+function verifyToken(req, res, next) {
+  const header = req.headers.authorization;
+  if (!header) return res.status(401).json({ message: "Token missing" });
+  const token = header.split(" ")[1];
+  try {
+    req.user = jwt.verify(token, SECRET);
+    next();
+  } catch {
+    res.status(403).json({ message: "Invalid token" });
+  }
+}
+
+// Middleware for role authorization
+function authorizeRoles(...roles) {
+  return (req, res, next) => {
+    if (!roles.includes(req.user.role))
+      return res.status(403).json({ message: "Access denied" });
+    next();
+  };
+}
+
+// Protected routes
+app.get("/user", verifyToken, authorizeRoles("User", "Moderator", "Admin"), (req, res) => {
+  res.json({ message: "Welcome User!" });
+});
+
+app.get("/moderator", verifyToken, authorizeRoles("Moderator", "Admin"), (req, res) => {
+  res.json({ message: "Welcome Moderator!" });
+});
+
+app.get("/admin", verifyToken, authorizeRoles("Admin"), (req, res) => {
+  res.json({ message: "Welcome Admin!" });
+});
+
+app.listen(5000, () => console.log("Server running on http://localhost:5000"));
